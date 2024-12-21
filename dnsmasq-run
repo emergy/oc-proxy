@@ -1,0 +1,184 @@
+#!/bin/sh
+
+if [ "${DNSMASQ:-true}" = "false" ]; then
+  echo "INFO: DNSMASQ is disabled"
+  sleep 3000d
+fi
+
+#
+# ------------------------------------------------------------------------------
+# dnsmasq-run (runit service script)
+#
+# Назначение:
+#   Запускать dnsmasq в форграунде, передавая аргументы через отдельные
+#   переменные окружения (ENV) с префиксом DNSMASQ_.
+#
+# Использование:
+#   1) Положите этот скрипт в /etc/service/dnsmasq/run
+#   2) Сделайте его исполняемым: chmod +x /etc/service/dnsmasq/run
+#   3) При запуске контейнера runit (CMD ["runsvdir", "/etc/service"]) найдёт данный
+#      скрипт и запустит dnsmasq.
+#   4) Передавайте нужные переменные окружения через docker run (или docker-compose).
+#
+# Пример:
+#   docker run -e DNSMASQ_NO_DAEMON=true \
+#              -e DNSMASQ_PORT=8053 \
+#              -e DNSMASQ_INTERFACE=eth0 \
+#              -e DNSMASQ_CACHE_SIZE=1000 \
+#              <image>
+#
+#   Это пробросит параметры:
+#     --no-daemon
+#     --port=8053
+#     --interface=eth0
+#     --cache-size=1000
+#
+# ------------------------------------------------------------------------------
+# Ниже перечислены некоторые переменные окружения (дополняйте при необходимости):
+#
+#   DNSMASQ_LISTEN_ADDRESS       => --listen-address=<ipaddr>
+#   DNSMASQ_ADDRESS              => --address=/<domain>/<ipaddr>
+#   DNSMASQ_BOGUS_PRIV           => --bogus-priv
+#   DNSMASQ_BOGUS_NXDOMAIN       => --bogus-nxdomain=<ipaddr>
+#   DNSMASQ_CACHE_SIZE           => --cache-size=<integer>
+#   DNSMASQ_CONF_FILE            => --conf-file=<path>
+#   DNSMASQ_NO_DAEMON            => --no-daemon
+#   DNSMASQ_DOMAIN_NEEDED        => --domain-needed
+#   DNSMASQ_KEEP_IN_FOREGROUND   => --keep-in-foreground
+#   DNSMASQ_INTERFACE            => --interface=<interface>
+#   DNSMASQ_EXCEPT_INTERFACE     => --except-interface=<interface>
+#   DNSMASQ_NO_HOSTS             => --no-hosts
+#   DNSMASQ_ADDN_HOSTS           => --addn-hosts=<path>
+#   DNSMASQ_NO_POLL              => --no-poll
+#   DNSMASQ_NO_NEGCACHE          => --no-negcache
+#   DNSMASQ_STRICT_ORDER         => --strict-order
+#   DNSMASQ_PORT                 => --port=<integer>
+#   DNSMASQ_EDNS_PACKET_MAX      => --edns-packet-max=<integer>
+#   DNSMASQ_LOG_QUERIES          => --log-queries
+#   DNSMASQ_NO_RESOLV            => --no-resolv
+#   DNSMASQ_RESOLV_FILE          => --resolv-file=<path>
+#   DNSMASQ_SERVER               => --server=/<domain>/<ipaddr>
+#   DNSMASQ_LOCAL                => --local=/<domain>/
+#   DNSMASQ_DOMAIN               => --domain=<domain>[,<range>]
+#   DNSMASQ_PID_FILE             => --pid-file=<path>
+#   DNSMASQ_BIND_INTERFACES      => --bind-interfaces
+#   DNSMASQ_READ_ETHERS          => --read-ethers
+#   ... и т.д.
+#
+# ------------------------------------------------------------------------------
+# Для удобства используем функцию add_flag_if_true для boolean-переменных:
+#
+
+# 1) Помогательная функция для флажков (true/false).
+add_flag_if_true() {
+  local var_value="$1"
+  local dnsmasq_opt="$2"
+  if [ "$var_value" = "true" ]; then
+    ARGS="$ARGS $dnsmasq_opt"
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# 2) Начинаем формировать список аргументов dnsmasq
+ARGS=""
+
+# --listen-address=<ipaddr>
+[ -n "${DNSMASQ_LISTEN_ADDRESS:=0.0.0.0}" ] && ARGS="$ARGS --listen-address=$DNSMASQ_LISTEN_ADDRESS"
+
+# --address=/<domain>/<ipaddr>
+[ -n "$DNSMASQ_ADDRESS" ] && ARGS="$ARGS --address=$DNSMASQ_ADDRESS"
+
+# --bogus-priv
+add_flag_if_true "$DNSMASQ_BOGUS_PRIV" "--bogus-priv"
+
+# --bogus-nxdomain=<ipaddr>
+[ -n "$DNSMASQ_BOGUS_NXDOMAIN" ] && ARGS="$ARGS --bogus-nxdomain=$DNSMASQ_BOGUS_NXDOMAIN"
+
+# --cache-size=<integer>
+[ -n "$DNSMASQ_CACHE_SIZE" ] && ARGS="$ARGS --cache-size=$DNSMASQ_CACHE_SIZE"
+
+# --conf-file=<path>
+[ -n "$DNSMASQ_CONF_FILE" ] && ARGS="$ARGS --conf-file=$DNSMASQ_CONF_FILE"
+
+# --no-daemon
+add_flag_if_true "${DNSMASQ_NO_DAEMON:-true}" "--no-daemon"
+
+# --domain-needed
+add_flag_if_true "$DNSMASQ_DOMAIN_NEEDED" "--domain-needed"
+
+# --keep-in-foreground
+add_flag_if_true "$DNSMASQ_KEEP_IN_FOREGROUND" "--keep-in-foreground"
+
+# --interface=<interface>
+[ -n "$DNSMASQ_INTERFACE" ] && ARGS="$ARGS --interface=$DNSMASQ_INTERFACE"
+
+# --except-interface=<interface>
+[ -n "$DNSMASQ_EXCEPT_INTERFACE" ] && ARGS="$ARGS --except-interface=$DNSMASQ_EXCEPT_INTERFACE"
+
+# --no-hosts
+add_flag_if_true "$DNSMASQ_NO_HOSTS" "--no-hosts"
+
+# --addn-hosts=<path>
+[ -n "$DNSMASQ_ADDN_HOSTS" ] && ARGS="$ARGS --addn-hosts=$DNSMASQ_ADDN_HOSTS"
+
+# --no-poll
+add_flag_if_true "$DNSMASQ_NO_POLL" "--no-poll"
+
+# --no-negcache
+add_flag_if_true "$DNSMASQ_NO_NEGCACHE" "--no-negcache"
+
+# --strict-order
+add_flag_if_true "$DNSMASQ_STRICT_ORDER" "--strict-order"
+
+# --port=<integer>
+[ -n "$DNSMASQ_PORT" ] && ARGS="$ARGS --port=$DNSMASQ_PORT"
+
+# --edns-packet-max=<integer>
+[ -n "$DNSMASQ_EDNS_PACKET_MAX" ] && ARGS="$ARGS --edns-packet-max=$DNSMASQ_EDNS_PACKET_MAX"
+
+# --log-queries
+add_flag_if_true "$DNSMASQ_LOG_QUERIES" "--log-queries"
+
+# --no-resolv
+add_flag_if_true "$DNSMASQ_NO_RESOLV" "--no-resolv"
+
+# --resolv-file=<path>
+[ -n "$DNSMASQ_RESOLV_FILE" ] && ARGS="$ARGS --resolv-file=$DNSMASQ_RESOLV_FILE"
+
+# --server=/<domain>/<ipaddr>
+# (можно задать несколько серверов через пробел, напр. export DNSMASQ_SERVER="/mydomain/1.2.3.4 /anotherdomain/5.6.7.8")
+[ -n "$DNSMASQ_SERVER" ] && {
+  for s in $DNSMASQ_SERVER; do
+    ARGS="$ARGS --server=$s"
+  done
+}
+
+# --local=/<domain>/
+[ -n "$DNSMASQ_LOCAL" ] && {
+  for loc in $DNSMASQ_LOCAL; do
+    ARGS="$ARGS --local=$loc"
+  done
+}
+
+# --domain=<domain>[,<range>]
+[ -n "$DNSMASQ_DOMAIN" ] && ARGS="$ARGS --domain=$DNSMASQ_DOMAIN"
+
+# --pid-file=<path>
+[ -n "$DNSMASQ_PID_FILE" ] && ARGS="$ARGS --pid-file=$DNSMASQ_PID_FILE"
+
+# --bind-interfaces
+add_flag_if_true "$DNSMASQ_BIND_INTERFACES" "--bind-interfaces"
+
+# --read-ethers
+add_flag_if_true "$DNSMASQ_READ_ETHERS" "--read-ethers"
+
+# ------------------------------------------------------------------------------
+# Добавляйте по аналогии другие опции, которые вам необходимы:
+#  DNSMASQ_XXX => --xxx[=<value>] или флажок --xxx
+#
+# Пример:
+# [ -n "$DNSMASQ_SOMETHING" ] && ARGS="$ARGS --something=$DNSMASQ_SOMETHING"
+#
+# ------------------------------------------------------------------------------
+echo "INFO: Запуск dnsmasq с аргументами: $ARGS"
+exec dnsmasq $ARGS

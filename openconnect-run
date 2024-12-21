@@ -1,0 +1,242 @@
+#!/bin/sh
+#
+# ------------------------------------------------------------------------------
+# openconnect-run (runit service script)
+#
+# Назначение:
+#   Запускать openconnect в форграунде, передавая все нужные аргументы
+#   через **отдельные переменные окружения** (по одной ENV-переменной на каждую опцию).
+#
+# Как использовать:
+#   1) Положите этот скрипт в /etc/service/openconnect/run
+#   2) Сделайте его исполняемым: chmod +x /etc/service/openconnect/run
+#   3) При запуске контейнера runit (runsvdir /etc/service) найдёт данный скрипт
+#      и запустит его.
+#   4) Передавайте нужные переменные окружения в docker run или docker-compose.
+#
+# Пример:
+#   docker run -e OPENCONNECT_SERVER=vpn.example.com \
+#              -e OPENCONNECT_USER=alice \
+#              -e OPENCONNECT_PROTOCOL=nc \
+#              -e OPENCONNECT_PASSWD_ON_STDIN=true \
+#              -e OPENCONNECT_PASSWORD=superSecret \
+#              ...
+#              <image>
+#
+# Основные переменные окружения (можно расширять):
+#
+#   --- Общие настройки ---
+#   OPENCONNECT_SERVER             = VPN-сервер (обязателен)
+#   OPENCONNECT_PROTOCOL           = anyconnect|nc|gp|pulse|f5|fortinet|array ( --protocol= )
+#   OPENCONNECT_USER               = имя пользователя ( --user= )
+#   OPENCONNECT_NO_PASSWD          = [true/false]  ( --no-passwd )
+#   OPENCONNECT_NON_INTER          = [true/false]  ( --non-inter )
+#   OPENCONNECT_PASSWD_ON_STDIN    = [true/false]  ( --passwd-on-stdin )
+#   OPENCONNECT_PASSWORD           = пароль, если используется --passwd-on-stdin
+#   OPENCONNECT_AUTHGROUP          = ( --authgroup= )
+#   OPENCONNECT_COOKIE             = ( --cookie= )
+#   OPENCONNECT_COOKIE_ON_STDIN    = [true/false]  ( --cookie-on-stdin )
+#   OPENCONNECT_CERTIFICATE        = ( --certificate= )
+#   OPENCONNECT_SSLKEY             = ( --sslkey= )
+#   OPENCONNECT_CERT_EXPIRE_WARN   = ( --cert-expire-warning= )
+#   OPENCONNECT_USERGROUP          = ( --usergroup= )
+#   OPENCONNECT_KEY_PASSWORD       = ( --key-password= )
+#   OPENCONNECT_EXTERNAL_BROWSER   = ( --external-browser= )
+#   OPENCONNECT_TOKEN_MODE         = rsa|totp|hotp|oidc ( --token-mode= )
+#   OPENCONNECT_TOKEN_SECRET       = ( --token-secret= )
+#   OPENCONNECT_SERVERCERT         = ( --servercert= )
+#   OPENCONNECT_NO_SYSTEM_TRUST    = [true/false] ( --no-system-trust )
+#   OPENCONNECT_CAFILE             = ( --cafile= )
+#
+#   --- Сеть и прокси ---
+#   OPENCONNECT_PROXY              = ( --proxy= )
+#   OPENCONNECT_PROXY_AUTH         = ( --proxy-auth= )
+#   OPENCONNECT_NO_PROXY           = [true/false] ( --no-proxy )
+#   OPENCONNECT_LIBPROXY           = [true/false] ( --libproxy )
+#   OPENCONNECT_RECONNECT_TIMEOUT  = ( --reconnect-timeout= )
+#   OPENCONNECT_RESOLVE            = ( --resolve=HOST:IP )
+#   OPENCONNECT_SNI                = ( --sni= )
+#   OPENCONNECT_PASSTOS            = [true/false] ( --passtos )
+#   OPENCONNECT_DTLS_LOCAL_PORT    = ( --dtls-local-port= )
+#
+#   --- Флаги аутентификации ---
+#   OPENCONNECT_AUTHENTICATE       = [true/false] ( --authenticate )
+#   OPENCONNECT_COOKIEONLY         = [true/false] ( --cookieonly )
+#   OPENCONNECT_PRINTCOOKIE        = [true/false] ( --printcookie )
+#
+#   --- Процесс, фоновые режимы ---
+#   OPENCONNECT_BACKGROUND         = [true/false] ( --background )
+#   OPENCONNECT_PID_FILE           = ( --pid-file= )
+#   OPENCONNECT_SETUID             = ( --setuid= )
+#
+#   --- Логирование ---
+#   OPENCONNECT_SYSLOG             = [true/false] ( --syslog )
+#   OPENCONNECT_VERBOSE            = [true/false] ( --verbose )
+#   OPENCONNECT_QUIET              = [true/false] ( --quiet )
+#   OPENCONNECT_DUMP_HTTP_TRAFFIC  = [true/false] ( --dump-http-traffic )
+#   OPENCONNECT_TIMESTAMP          = [true/false] ( --timestamp )
+#
+#   --- Настройка VPN-интерфейса ---
+#   OPENCONNECT_INTERFACE          = ( --interface= )
+#   OPENCONNECT_SCRIPT             = ( --script= )
+#   OPENCONNECT_SCRIPT_TUN         = [true/false] ( --script-tun )
+#   OPENCONNECT_DISABLE_IPV6       = [true/false] ( --disable-ipv6 )
+#   OPENCONNECT_XMLCONFIG          = ( --xmlconfig= )
+#   OPENCONNECT_MTU                = ( --mtu= )
+#   OPENCONNECT_BASE_MTU           = ( --base-mtu= )
+#   OPENCONNECT_DEFLATE            = [true/false] ( --deflate )
+#   OPENCONNECT_NO_DEFLATE         = [true/false] ( --no-deflate )
+#   OPENCONNECT_FORCE_DPD          = ( --force-dpd= )
+#   OPENCONNECT_PFS                = [true/false] ( --pfs )
+#   OPENCONNECT_NO_DTLS            = [true/false] ( --no-dtls )
+#   OPENCONNECT_DTLS_CIPHERS       = ( --dtls-ciphers= )
+#   OPENCONNECT_QUEUE_LEN          = ( --queue-len= )
+#
+#   --- Доп. сведения о системе ---
+#   OPENCONNECT_USERAGENT          = ( --useragent= )
+#   OPENCONNECT_LOCAL_HOSTNAME     = ( --local-hostname= )
+#   OPENCONNECT_OS                 = linux|linux-64|win|mac-intel|android|apple-ios ( --os= )
+#   OPENCONNECT_VERSION_STRING     = ( --version-string= )
+#
+#   --- Trojan binary (CSD) ---
+#   OPENCONNECT_CSD_USER           = ( --csd-user= )
+#   OPENCONNECT_CSD_WRAPPER        = ( --csd-wrapper= )
+#   OPENCONNECT_FORCE_TROJAN       = ( --force-trojan= )
+#
+#   --- Прочие флаги ---
+#   OPENCONNECT_NO_EXTERNAL_AUTH   = [true/false] ( --no-external-auth )
+#   OPENCONNECT_NO_HTTP_KEEPALIVE  = [true/false] ( --no-http-keepalive )
+#   OPENCONNECT_NO_XMLPOST         = [true/false] ( --no-xmlpost )
+#   OPENCONNECT_ALLOW_INSECURE_CRY = [true/false] ( --allow-insecure-crypto )
+#
+#   --- Multiple certificate auth (MCA) ---
+#   OPENCONNECT_MCA_CERTIFICATE    = ( --mca-certificate= )
+#   OPENCONNECT_MCA_KEY            = ( --mca-key= )
+#   OPENCONNECT_MCA_KEY_PASSWORD   = ( --mca-key-password= )
+#
+# ------------------------------------------------------------------------------
+# Важно:
+#   1) Если вы передаёте пароль через stdin (--passwd-on-stdin), убедитесь, что
+#      у вас установлена OPENCONNECT_PASSWORD, иначе процесс будет "висеть" в ожидании
+#      пароля с терминала.
+#   2) Если не нужен stdin, просто не ставьте OPENCONNECT_PASSWD_ON_STDIN=true.
+#   3) Если требуется передавать cookie через stdin, по аналогии придётся эмулировать
+#      ввод cookie из переменной окружения, как с паролем.
+# ------------------------------------------------------------------------------
+
+# Прекращаем, если не указан сервер:
+if [ -z "$OPENCONNECT_SERVER" ]; then
+  echo "ERROR: \$OPENCONNECT_SERVER не задан. Укажите адрес VPN-сервера (например: vpn.example.com)."
+  exit 1
+fi
+
+# Начинаем формировать список аргументов
+ARGS=""
+
+# ------- Функция-хелпер для флажков (true/false) -------
+add_flag_if_true() {
+  # $1 = текущее значение переменной (true/false)
+  # $2 = опция, которую нужно добавить, если $1 == "true"
+  if [ "$1" = "true" ]; then
+    ARGS="$ARGS $2"
+  fi
+}
+
+# ------- Пример для строкового аргумента --protocol=<value> -------
+[ -n "$OPENCONNECT_PROTOCOL" ]  && ARGS="$ARGS --protocol=$OPENCONNECT_PROTOCOL"
+[ -n "$OPENCONNECT_USER" ]      && ARGS="$ARGS --user=$OPENCONNECT_USER"
+add_flag_if_true "$OPENCONNECT_NO_PASSWD"    "--no-passwd"
+add_flag_if_true "$OPENCONNECT_NON_INTER"    "--non-inter"
+add_flag_if_true "$OPENCONNECT_COOKIE_ON_STDIN"  "--cookie-on-stdin"
+[ -n "$OPENCONNECT_COOKIE" ]    && ARGS="$ARGS --cookie=$OPENCONNECT_COOKIE"
+[ -n "$OPENCONNECT_AUTHGROUP" ] && ARGS="$ARGS --authgroup=$OPENCONNECT_AUTHGROUP"
+[ -n "$OPENCONNECT_CERTIFICATE" ]          && ARGS="$ARGS --certificate=$OPENCONNECT_CERTIFICATE"
+[ -n "$OPENCONNECT_SSLKEY" ]               && ARGS="$ARGS --sslkey=$OPENCONNECT_SSLKEY"
+[ -n "$OPENCONNECT_CERT_EXPIRE_WARN" ]     && ARGS="$ARGS --cert-expire-warning=$OPENCONNECT_CERT_EXPIRE_WARN"
+[ -n "$OPENCONNECT_USERGROUP" ]            && ARGS="$ARGS --usergroup=$OPENCONNECT_USERGROUP"
+[ -n "$OPENCONNECT_KEY_PASSWORD" ]         && ARGS="$ARGS --key-password=$OPENCONNECT_KEY_PASSWORD"
+[ -n "$OPENCONNECT_EXTERNAL_BROWSER" ]     && ARGS="$ARGS --external-browser=$OPENCONNECT_EXTERNAL_BROWSER"
+[ -n "$OPENCONNECT_TOKEN_MODE" ]           && ARGS="$ARGS --token-mode=$OPENCONNECT_TOKEN_MODE"
+[ -n "$OPENCONNECT_TOKEN_SECRET" ]         && ARGS="$ARGS --token-secret=$OPENCONNECT_TOKEN_SECRET"
+[ -n "$OPENCONNECT_SERVERCERT" ]           && ARGS="$ARGS --servercert=$OPENCONNECT_SERVERCERT"
+add_flag_if_true "$OPENCONNECT_NO_SYSTEM_TRUST"    "--no-system-trust"
+[ -n "$OPENCONNECT_CAFILE" ]               && ARGS="$ARGS --cafile=$OPENCONNECT_CAFILE"
+
+# --- Параметры сети / прокси ---
+[ -n "$OPENCONNECT_PROXY" ]      && ARGS="$ARGS --proxy=$OPENCONNECT_PROXY"
+[ -n "$OPENCONNECT_PROXY_AUTH" ] && ARGS="$ARGS --proxy-auth=$OPENCONNECT_PROXY_AUTH"
+add_flag_if_true "$OPENCONNECT_NO_PROXY"  "--no-proxy"
+add_flag_if_true "$OPENCONNECT_LIBPROXY" "--libproxy"
+[ -n "$OPENCONNECT_RECONNECT_TIMEOUT" ] && ARGS="$ARGS --reconnect-timeout=$OPENCONNECT_RECONNECT_TIMEOUT"
+[ -n "$OPENCONNECT_RESOLVE" ]           && ARGS="$ARGS --resolve=$OPENCONNECT_RESOLVE"
+[ -n "$OPENCONNECT_SNI" ]               && ARGS="$ARGS --sni=$OPENCONNECT_SNI"
+add_flag_if_true "$OPENCONNECT_PASSTOS" "--passtos"
+[ -n "$OPENCONNECT_DTLS_LOCAL_PORT" ]   && ARGS="$ARGS --dtls-local-port=$OPENCONNECT_DTLS_LOCAL_PORT"
+
+# --- Аутентификация (двухфазная) ---
+add_flag_if_true "$OPENCONNECT_AUTHENTICATE" "--authenticate"
+add_flag_if_true "$OPENCONNECT_COOKIEONLY"   "--cookieonly"
+add_flag_if_true "$OPENCONNECT_PRINTCOOKIE"  "--printcookie"
+
+# --- Процесс / фон ---
+add_flag_if_true "$OPENCONNECT_BACKGROUND" "--background"
+[ -n "$OPENCONNECT_PID_FILE" ] && ARGS="$ARGS --pid-file=$OPENCONNECT_PID_FILE"
+[ -n "$OPENCONNECT_SETUID" ]   && ARGS="$ARGS --setuid=$OPENCONNECT_SETUID"
+
+# --- Логирование ---
+add_flag_if_true "$OPENCONNECT_SYSLOG"   "--syslog"
+add_flag_if_true "$OPENCONNECT_VERBOSE"  "--verbose"
+add_flag_if_true "$OPENCONNECT_QUIET"    "--quiet"
+add_flag_if_true "$OPENCONNECT_DUMP_HTTP_TRAFFIC" "--dump-http-traffic"
+add_flag_if_true "$OPENCONNECT_TIMESTAMP" "--timestamp"
+
+# --- Настройка VPN-интерфейса ---
+[ -n "$OPENCONNECT_INTERFACE" ] && ARGS="$ARGS --interface=$OPENCONNECT_INTERFACE"
+[ -n "$OPENCONNECT_SCRIPT" ]    && ARGS="$ARGS --script=$OPENCONNECT_SCRIPT"
+add_flag_if_true "$OPENCONNECT_SCRIPT_TUN"   "--script-tun"
+add_flag_if_true "$OPENCONNECT_DISABLE_IPV6" "--disable-ipv6"
+[ -n "$OPENCONNECT_XMLCONFIG" ] && ARGS="$ARGS --xmlconfig=$OPENCONNECT_XMLCONFIG"
+[ -n "$OPENCONNECT_MTU" ]       && ARGS="$ARGS --mtu=$OPENCONNECT_MTU"
+[ -n "$OPENCONNECT_BASE_MTU" ]  && ARGS="$ARGS --base-mtu=$OPENCONNECT_BASE_MTU"
+add_flag_if_true "$OPENCONNECT_DEFLATE"    "--deflate"
+add_flag_if_true "$OPENCONNECT_NO_DEFLATE" "--no-deflate"
+[ -n "$OPENCONNECT_FORCE_DPD" ] && ARGS="$ARGS --force-dpd=$OPENCONNECT_FORCE_DPD"
+add_flag_if_true "$OPENCONNECT_PFS" "--pfs"
+add_flag_if_true "$OPENCONNECT_NO_DTLS" "--no-dtls"
+[ -n "$OPENCONNECT_DTLS_CIPHERS" ] && ARGS="$ARGS --dtls-ciphers=$OPENCONNECT_DTLS_CIPHERS"
+[ -n "$OPENCONNECT_QUEUE_LEN" ]    && ARGS="$ARGS --queue-len=$OPENCONNECT_QUEUE_LEN"
+
+# --- Доп. сведения о системе ---
+[ -n "$OPENCONNECT_USERAGENT" ]       && ARGS="$ARGS --useragent=$OPENCONNECT_USERAGENT"
+[ -n "$OPENCONNECT_LOCAL_HOSTNAME" ]  && ARGS="$ARGS --local-hostname=$OPENCONNECT_LOCAL_HOSTNAME"
+[ -n "$OPENCONNECT_OS" ]             && ARGS="$ARGS --os=$OPENCONNECT_OS"
+[ -n "$OPENCONNECT_VERSION_STRING" ]  && ARGS="$ARGS --version-string=$OPENCONNECT_VERSION_STRING"
+
+# --- Trojan binary (CSD) ---
+[ -n "$OPENCONNECT_CSD_USER" ]        && ARGS="$ARGS --csd-user=$OPENCONNECT_CSD_USER"
+[ -n "$OPENCONNECT_CSD_WRAPPER" ]     && ARGS="$ARGS --csd-wrapper=$OPENCONNECT_CSD_WRAPPER"
+[ -n "$OPENCONNECT_FORCE_TROJAN" ]    && ARGS="$ARGS --force-trojan=$OPENCONNECT_FORCE_TROJAN"
+
+# --- Прочие флаги ---
+add_flag_if_true "$OPENCONNECT_NO_EXTERNAL_AUTH"  "--no-external-auth"
+add_flag_if_true "$OPENCONNECT_NO_HTTP_KEEPALIVE" "--no-http-keepalive"
+add_flag_if_true "$OPENCONNECT_NO_XMLPOST"        "--no-xmlpost"
+add_flag_if_true "$OPENCONNECT_ALLOW_INSECURE_CRY" "--allow-insecure-crypto"
+
+# --- Multiple certificate auth (MCA) ---
+[ -n "$OPENCONNECT_MCA_CERTIFICATE" ]  && ARGS="$ARGS --mca-certificate=$OPENCONNECT_MCA_CERTIFICATE"
+[ -n "$OPENCONNECT_MCA_KEY" ]          && ARGS="$ARGS --mca-key=$OPENCONNECT_MCA_KEY"
+[ -n "$OPENCONNECT_MCA_KEY_PASSWORD" ] && ARGS="$ARGS --mca-key-password=$OPENCONNECT_MCA_KEY_PASSWORD"
+
+# === Теперь главное: нужно добавить сервер ===
+# (допустимо и без --server=, просто server в конце, но для единообразия используем --server=)
+ARGS="$ARGS --server=$OPENCONNECT_SERVER"
+
+# --- Обработка пароля через stdin ---
+if [ "${OPENCONNECT_PASSWD_ON_STDIN:-true}" = "true" ] && [ -n "$OPENCONNECT_PASSWORD" ]; then
+  echo "INFO: Запуск openconnect, пароль берём из \$OPENCONNECT_PASSWORD (stdin)."
+  echo "$OPENCONNECT_PASSWORD" | exec openconnect $ARGS
+else
+  echo "INFO: Запуск openconnect (без пароля через stdin)."
+  exec openconnect $ARGS
+fi
