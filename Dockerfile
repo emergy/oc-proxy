@@ -26,8 +26,8 @@ RUN apk add --no-cache \
   runit \
   jq \
   && mkdir -p /etc/service/openconnect /etc/service/dnsmasq \
-  && mkdir -p /opt/3proxy \
-  && ln -s /etc/3proxy /opt/3proxy/cfg
+  && mkdir -p /opt/3proxy/cfg \
+  && ln -s /opt/3proxy/cfg /etc/3proxy
 
 
 RUN mkdir -p /etc/service/openconnect /etc/service/dnsmasq
