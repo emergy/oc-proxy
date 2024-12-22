@@ -232,6 +232,14 @@ add_flag_if_true "$OPENCONNECT_ALLOW_INSECURE_CRY" "--allow-insecure-crypto"
 # (допустимо и без --server=, просто server в конце, но для единообразия используем --server=)
 ARGS="$ARGS --server=$OPENCONNECT_SERVER"
 
+if [ "${DNS_ROUTES:-true}" = "true" ]; then
+  # --- Добавляем маршруты для DNS-серверов ---
+  GW=`ip route list | awk '/^default/ {print $3}'`
+  for i in `awk '/^nameserver/ {print $2}' /etc/resolv.conf`; do
+    ip route add $i via $GW
+  done
+fi
+
 # --- Обработка пароля через stdin ---
 if [ "${OPENCONNECT_PASSWD_ON_STDIN:-true}" = "true" ] && [ -n "$OPENCONNECT_PASSWORD" ]; then
   echo "INFO: Запуск openconnect, пароль берём из \$OPENCONNECT_PASSWORD (stdin)."

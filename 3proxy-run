@@ -9,7 +9,7 @@ done
 
 sleep 5
 
-if [ ! -f $CFG ]; then
+if [ -f $CFG ]; then
   /opt/3proxy/bin/3proxy $CFG
 else
   > $CFG
@@ -25,13 +25,13 @@ else
   [ -n "$ZPROXY_LOGFORMAT" ] && echo "logformat $ZPROXY_LOGFORMAT" >> $CFG
   [ -n "$ZPROXY_LOGROTATE" ] && echo "rotate $ZPROXY_LOGROTATE" >> $CFG
 
-  if [ -n "$ZPROXY_EXTERNAL"]; then
+  if [ -n "$ZPROXY_EXTERNAL" ]; then
     echo "external $ZPROXY_EXTERNAL" >> $CFG
   else
     echo "external 0.0.0.0" >> $CFG
   fi
 
-  if [ -n "$ZPROXY_INTERNAL"]; then
+  if [ -n "$ZPROXY_INTERNAL" ]; then
     echo "internal $ZPROXY_INTERNAL" >> $CFG
   else
     DEV=`ip -j ro get 255.255.255.255 | jq -r '.[].dev'`
@@ -44,7 +44,7 @@ else
   if [ -n "$ZPROXY_ALLOW" ]; then
     echo "$ZPROXY_ALLOW" | sed 's/,/\n/g' | sed 's/^/allow /' >> $CFG
   else
-    echo "allow *"
+    echo "allow *" >> $CFG
   fi
 
   cat << EOF >> $CFG
